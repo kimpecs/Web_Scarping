@@ -3,12 +3,15 @@ import requests
 import pdfplumber
 import pandas as pd
 from pathlib import Path
+import logging
+
+# Suppress noisy PDFMiner warnings
+logging.getLogger("pdfminer").setLevel(logging.ERROR)
 
 # -----------------------------
 # 1. CONFIGURATION
 # -----------------------------
 PDF_URLS = {
-    "Gates_Fleet_HeavyDuty": "https://pdf.directindustry.com/pdf/gates/fleet-heaw-dutv-applications/4801-525079.html",
     "Dayton_Hydraulic_Brakes": "https://lascotruckparts.com/wp-content/uploads/2023/09/Dayton-Parts-Frenos-Hidraulicos-Parte-1-ENG-Dayton-Parts-Hydraulic-Brakes-Part-1.pdf",
     "Dana_Spicer": "https://www.canadawideparts.com/downloads/catalogs/dana_spicer_tandemAxles_461-462-463-521-581_AXIP-0085A.pdf",
     "PAI_Drivetrain": "https://barringtondieselclub.co.za/mack/general/mack/pai-mack-volvo-parts.pdf",
@@ -21,12 +24,17 @@ PDF_URLS = {
     "FortPro_Lighting": "https://www.fortpro.com/images/uploaded/LIGHTING_2020.pdf",
     "Velvac": "https://www.velvac.com/sites/default/files/velvac_catalog_2016.pdf",
     "Leaf_Springs": "https://springer-parts.com/OMK_Springs_catalog-2024_EN.pdf",
-    "Automan_Suspension": "https://www.midwestwheel.com/w/automann-suspension-catalog",
+    "Automan_Suspension": "https://www.midwestwheel.com/w/automann-suspension-catalog", 
     "Stemco_Gaff": "https://www.stemco.com/wp-content/uploads/2020/07/STEMCO_GAFF-Catalog.pdf"
+
 }
 
 SAVE_DIR = Path("pdf_catalogs")
 SAVE_DIR.mkdir(exist_ok=True)
+
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+}
 
 # -----------------------------
 # 2. DOWNLOAD PDFs
@@ -39,10 +47,17 @@ def download_pdfs():
             continue
         try:
             print(f"[DOWNLOAD] {name} from {url}")
-            response = requests.get(url, timeout=30)
-            response.raise_for_status()
+            r = requests.get(url, headers=HEADERS, stream=True, timeout=30)
+            r.raise_for_status()
+
+            # Check file type
+            content_type = r.headers.get("Content-Type", "")
+            if "application/pdf" not in content_type:
+                print(f"[SKIP] {name} is not a PDF (Content-Type={content_type})")
+                continue
+
             with open(file_path, "wb") as f:
-                f.write(response.content)
+                f.write(r.content)
         except Exception as e:
             print(f"[ERROR] Could not download {name}: {e}")
 
@@ -50,10 +65,6 @@ def download_pdfs():
 # 3. EXTRACT DATA FROM PDF
 # -----------------------------
 def extract_pdf_text(pdf_path):
-    """
-    Extracts text line by line from PDF.
-    If the PDF has tables, pdfplumber may capture rows properly.
-    """
     extracted_data = []
     try:
         with pdfplumber.open(pdf_path) as pdf:
@@ -66,6 +77,8 @@ def extract_pdf_text(pdf_path):
                             "Page": page_num,
                             "Content": line.strip()
                         })
+        if not extracted_data:
+            print(f"[WARNING] {pdf_path.name} might be image-only (scanned PDF). No text extracted.")
     except Exception as e:
         print(f"[ERROR] Failed to read {pdf_path.name}: {e}")
     return extracted_data
